@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Calendar Event Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+        #date-range-form {
+            margin: 20px;
+        }
+        #error-message {
+            color: red;
+            display: none;
+        }
+        /* Loading spinner */
+        #loading-spinner {
+            display: none;
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            border: 16px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 16px solid #3498db;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+            z-index: 9999; /* Ensure it's on top */
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <h1>Google Calendar Event Map</h1>
+    <div id="date-range-form">
+        <label for="start-date">Start Date:</label>
+        <input type="date" id="start-date" name="start-date">
+        <label for="end-date">End Date:</label>
+        <input type="date" id="end-date" name="end-date">
+        <button id="fetch-events">Fetch Events</button>
+        <p id="error-message">Please enter both a start date and an end date.</p>
+    </div>
+
+    <div id="loading-spinner"></div> <!-- Loading spinner element -->
+
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([32.7078, -97.001], 10); // Centered on Dallas-Fort Worth
+
+        // Add OpenStreetMap tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19
+        }).addTo(map);
+
+        // Create layer groups for morning and afternoon appointments by technician
+        const technicianLayers = {
+            'calendar.lonestarirrigation@gmail.com': {
+                morning: L.layerGroup().addTo(map),
+                afternoon: L.layerGroup().addTo(map)
+            },
+            'davonzia.lonestarirrigation@gmail.com': {
+                morning: L.layerGroup().addTo(map),
+                afternoon: L.layerGroup().addTo(map)
+            },
+            'matthias.lonestarirrigation@gmail.com': {
+                morning: L.layerGroup().addTo(map),
+                afternoon: L.layerGroup().addTo(map)
+            },
+            'hakeemlonestarirrigation@gmail.com': {
+                morning: L.layerGroup().addTo(map),
+                afternoon: L.layerGroup().addTo(map)
+            }
+        };
+
+        // Define overlays for layer control, showing both technicians and time slots
+        const overlays = {
+            'Technician: calendar.lonestarirrigation@gmail.com (Morning)': technicianLayers['calendar.lonestarirrigation@gmail.com'].morning,
+            'Technician: calendar.lonestarirrigation@gmail.com (Afternoon)': technicianLayers['calendar.lonestarirrigation@gmail.com'].afternoon,
+            'Technician: davonzia.lonestarirrigation@gmail.com (Morning)': technicianLayers['davonzia.lonestarirrigation@gmail.com'].morning,
+            'Technician: davonzia.lonestarirrigation@gmail.com (Afternoon)': technicianLayers['davonzia.lonestarirrigation@gmail.com'].afternoon,
+            'Technician: matthias.lonestarirrigation@gmail.com (Morning)': technicianLayers['matthias.lonestarirrigation@gmail.com'].morning,
+            'Technician: matthias.lonestarirrigation@gmail.com (Afternoon)': technicianLayers['matthias.lonestarirrigation@gmail.com'].afternoon,
+            'Technician: hakeemlonestarirrigation@gmail.com (Morning)': technicianLayers['hakeemlonestarirrigation@gmail.com'].morning,
+            'Technician: hakeemlonestarirrigation@gmail.com (Afternoon)': technicianLayers['hakeemlonestarirrigation@gmail.com'].afternoon
+        };
+
+        L.control.layers(null, overlays).addTo(map);
+
+        // Function to fetch and display events
+        document.getElementById('fetch-events').addEventListener('click', () => {
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            const errorMessage = document.getElementById('error-message');
+            const loadingSpinner = document.getElementById('loading-spinner');
+
+            if (!startDate || !endDate) {
+                errorMessage.style.display = 'block';
+                return;
+            }
+
+            errorMessage.style.display = 'none';
+            loadingSpinner.style.display = 'block'; // Show loading spinner
+
+            const timeMin = new Date(startDate).toISOString();
+            const timeMax = new Date(endDate).toISOString();
+
+            // Fetch events from the server
+            fetch(`/api/events?timeMin=${timeMin}&timeMax=${timeMax}`)
+                .then(response => response.json())
+                .then(events => {
+                    // Clear previous markers
+                    Object.values(technicianLayers).forEach(layer => {
+                        layer.morning.clearLayers();
+                        layer.afternoon.clearLayers();
+                    });
+
+                    // Add markers to the map
+                    events.forEach(event => {
+                        if (event.coordinates) {
+                            const coords = [event.coordinates.lat, event.coordinates.lng];
+                            const startHour = parseInt(event.start.slice(event.start.indexOf('T') + 1, event.start.indexOf('T') + 3), 10);
+                            const timeOfDay = startHour < 12 ? 'morning' : 'afternoon';
+
+                            const technicianLayer = technicianLayers[event.technician];
+                            const layerGroup = technicianLayer ? technicianLayer[timeOfDay] : null;
+
+                            const iconColor = {
+                                'calendar.lonestarirrigation@gmail.com': '#e78ac3',
+                                'davonzia.lonestarirrigation@gmail.com': '#8da0cb',
+                                'matthias.lonestarirrigation@gmail.com': '#fc8d62',
+                                'hakeemlonestarirrigation@gmail.com': '#66c2a5'
+                            }[event.technician] || '#000000';
+
+                            const customIcon = L.divIcon({
+                                className: 'custom-icon',
+                                html: `
+                                    <div style="
+                                        background-color: ${iconColor};
+                                        color: white;
+                                        font-size: 12px;
+                                        border-radius: 2.5px;
+                                        border: 1px solid black;
+                                        padding: 2px;
+                                        display: inline-block;
+                                        white-space: nowrap;
+                                        text-align: center;
+                                        transform: translate(-50%, -50%);
+                                        font-family: 'Tahoma', sans-serif;
+                                    ">
+                                        ${event.title}
+                                    </div>
+                                `,
+                                iconSize: [100, 30],
+                                iconAnchor: [50, 30],
+                            });
+
+                            if (layerGroup) {
+                                L.marker(coords, { icon: customIcon })
+                                    .addTo(layerGroup)
+                                    .bindPopup(`<b>${event.title}</b><br>${event.location}<br>${event.start} - ${event.end}`);
+                            }
+                        }
+                    });
+
+                    loadingSpinner.style.display = 'none'; // Hide spinner after events load
+                })
+                .catch(error => {
+                    console.error('Error fetching events:', error);
+                    loadingSpinner.style.display = 'none'; // Hide spinner in case of error
+                });
+        });
+    </script>
+</body>
+</html>
